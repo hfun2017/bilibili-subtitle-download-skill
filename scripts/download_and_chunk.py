@@ -67,7 +67,12 @@ def get_video_info(bv_id, cookie):
     return data['data'], None
 
 def fetch_subtitle_content(bv_id, cid, cookie):
-    # Logic adapted from gpt-bilibili-to-notion
+    """
+    Fetch subtitles from Bilibili API. Supports both user-uploaded and AI-generated subtitles.
+    - User subtitles: lan='zh' (Chinese)
+    - AI subtitles: lan='ai-zh' (AI-generated Chinese)
+    Both have signed URLs with auth_key that can be directly accessed.
+    """
     subtitle_api = 'https://api.bilibili.com/x/player/v2'
     headers = {
         'authority': 'api.bilibili.com',
@@ -80,35 +85,58 @@ def fetch_subtitle_content(bv_id, cid, cookie):
     params = {'bvid': bv_id, 'cid': cid}
     resp = requests.get(subtitle_api, headers=headers, params=params)
     data = resp.json()
-    
+
     if data.get('code') != 0:
-        return None
-    
+        return None, None
+
     subtitles = data.get('data', {}).get('subtitle', {}).get('subtitles', [])
     if not subtitles:
-        return None
+        return None, None
 
-    # Prefer Chinese (zh-Hans or zh-CN)
-    target_url = ""
+    # Priority: user Chinese (zh) > AI Chinese (ai-zh) > any first
+    target_url = None
+    subtitle_type = None  # 'user' or 'ai'
+
+    # First pass: prefer user Chinese subtitle
     for s in subtitles:
-        if 'zh' in s.get('lan', ''):
-            target_url = s['subtitle_url']
+        lan = s.get('lan', '')
+        if lan == 'zh':
+            target_url = s.get('subtitle_url')
+            subtitle_type = 'user'
             break
-    
-    # If no Chinese subtitle found, but subtitles list is not empty
+
+    # Second pass: fallback to AI Chinese subtitle
+    if not target_url:
+        for s in subtitles:
+            lan = s.get('lan', '')
+            if lan == 'ai-zh':
+                target_url = s.get('subtitle_url')
+                subtitle_type = 'ai'
+                break
+
+    # Third pass: any available subtitle
     if not target_url and subtitles:
-        target_url = subtitles[0].get('subtitle_url', "")
+        target_url = subtitles[0].get('subtitle_url')
+        subtitle_type = 'user'
 
     if not target_url:
-        return None
+        return None, None
 
     if target_url.startswith('//'):
         target_url = 'https:' + target_url
-    
-    resp = requests.get(target_url)
+
+    resp = requests.get(target_url, timeout=30)
     body = resp.json().get('body', [])
     full_text = "\n".join([b.get('content', '') for b in body])
-    return full_text
+    return full_text, subtitle_type
+
+
+def fetch_ai_subtitle(bv_id, cid, cookie):
+    """
+    This function is kept for backward compatibility.
+    AI subtitles are now fetched directly in fetch_subtitle_content().
+    """
+    return None  # Not needed anymore
 
 async def main():
     if len(sys.argv) < 2:
@@ -140,12 +168,15 @@ async def main():
             raise Exception(f"Invalid P_NUM: video only has {len(pages)} parts.")
         cid = pages[p_num]['cid']
         
-        # Try fetching subtitle using the logic from gpt-bilibili-to-notion
-        full_text = fetch_subtitle_content(bv_id, cid, cookie)
-        
+        # Try fetching subtitle (supports both user and AI subtitles)
+        full_text, subtitle_type = fetch_subtitle_content(bv_id, cid, cookie)
+
         if not full_text:
-            print("ERROR: 没找到字幕喵...😿 请确认视频是否有 CC 字幕喵。")
+            print("ERROR: 没找到字幕喵...😿 请确认视频是否有字幕（用户字幕或AI字幕）。")
             sys.exit(1)
+
+        if subtitle_type == 'ai':
+            print("[*] 检测到AI字幕并获取成功！🐾", flush=True)
 
         title = info.get('title', bv_id)
         total_chars = len(full_text)
