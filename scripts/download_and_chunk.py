@@ -73,7 +73,7 @@ def fetch_subtitle_content(bv_id, cid, cookie):
     - AI subtitles: lan='ai-zh' (AI-generated Chinese)
     Both have signed URLs with auth_key that can be directly accessed.
     """
-    subtitle_api = 'https://api.bilibili.com/x/player/v2'
+    subtitle_api = 'https://api.bilibili.com/x/player/wbi/v2'
     headers = {
         'authority': 'api.bilibili.com',
         'accept': 'application/json, text/plain, */*',
